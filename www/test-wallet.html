@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html>
+ <head>
+  <meta charset="utf-8">
+  <title>Utility page to manage a test wallet on Stellar</title>
+  <script src="stellar-sdk.js"></script>
+  <script type="text/javascript">
+    function makeKeypair() {
+        var kp = StellarSdk.Keypair.random();
+        document.getElementById("secret_key").value = kp.secret();
+    }
+
+    function updatePublicKey() {
+        var sec = document.getElementById("secret_key").value;
+        localStorage.setItem("private-key", sec);
+        var kp = StellarSdk.Keypair.fromSecret(sec);
+        document.getElementById("public_key").textContent = kp.publicKey();
+        fetchAccountInfo();
+    }
+
+    function testServer() {
+        return new StellarSdk.Server("https://horizon-testnet.stellar.org");
+    }
+
+    function fetchAccountInfo() {
+        updateAccountInfo("Fetching account info...");
+        var publicKey = document.getElementById("public_key").textContent;
+        testServer().accounts().accountId(publicKey).call().then(updateAccountInfo, updateAccountInfo);
+    }
+
+    function updateAccountInfo(response) {
+        var acctInfoDiv = document.getElementById("account_info");
+        var makeAcctButton = document.getElementById("make_account");
+        if (response instanceof StellarSdk.NotFoundError) {
+            acctInfoDiv.textContent = response.message;
+            acctInfoDiv.style.color = "red";
+            makeAcctButton.disabled = false;
+        } else if (typeof response == "object") {
+            delete response["_links"];
+            acctInfoDiv.textContent = JSON.stringify(response, null, 4);
+            acctInfoDiv.style.color = "";
+            makeAcctButton.disabled = true;
+        } else {
+            acctInfoDiv.textContent = response;
+            acctInfoDiv.style.color = "red";
+            makeAcctButton.disabled = false;
+        }
+    }
+
+    function makeAccount() {
+        updateAccountInfo("Creating account...");
+        var server = testServer();
+        var friendbot = StellarSdk.Keypair.fromSecret("SA3W53XXG64ITFFIYQSBIJDG26LMXYRIMEVMNQMFAQJOYCZACCYBA34L");
+        var publicKey = document.getElementById("public_key").textContent;
+        server.accounts().accountId(friendbot.publicKey()).call().then(
+            ({ sequence }) => {
+                var account = new StellarSdk.Account(friendbot.publicKey(), sequence);
+                var transaction = new StellarSdk.TransactionBuilder(account, {
+                    fee: StellarSdk.BASE_FEE,
+                    networkPassphrase: StellarSdk.Networks.TESTNET
+                }).addOperation(StellarSdk.Operation.createAccount({
+                    destination: publicKey,
+                    startingBalance: "100"
+                })).setTimeout(10).build();
+                transaction.sign(friendbot);
+                return server.submitTransaction(transaction);
+            },
+            (failureBlob) => {
+                console.log("Failure when getting friendbot's account details: " + failureBlob);
+            }
+        ).then(
+            (results) => {
+                console.log("Transaction completed: ", results._links.transaction.href);
+                fetchAccountInfo();
+            },
+            (failureBlob) => {
+                console.log("Failure when submitting transaction to create account: " + failureBlob);
+            }
+        );
+    }
+
+    window.addEventListener("load", function() {
+        var sec = localStorage.getItem("private-key");
+        if (sec != null) {
+            document.getElementById("secret_key").value = sec;
+            updatePublicKey();
+        }
+    }, false);
+  </script>
+ </head>
+ <body>
+  <h1>1. Keypair creation</h1>
+  <p>If you have a secret key from an existing test account, enter it in the box below. Otherwise, click the button to generate a new keypair.</p>
+  <ul>
+   <li>Generate a new keypair for me. <button onclick="makeKeypair()">Make keypair</button></li>
+   <li>My secret key: <input id="secret_key" type="text" placeholder="56 character string starting with 'S'" style="width: 60em" onchange="updatePublicKey()"></li>
+  </ul>
+  The public key is <span id="public_key">???</span>
+  <h1>2. Account creation</h1>
+  Account information:
+  <div id="account_info" style="white-space: pre; border: solid 1px black; font-family: monospace"></div>
+  <button id="make_account" onclick="makeAccount()">Make account</button>
+ </body>
+</html>

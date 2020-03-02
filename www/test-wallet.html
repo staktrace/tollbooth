@@ -40,19 +40,23 @@
     function updateAccountInfo(response) {
         var acctInfoDiv = document.getElementById("account_info");
         var makeAcctButton = document.getElementById("make_account");
+        var makePaymentButton = document.getElementById("make_payment");
         if (response instanceof StellarSdk.NotFoundError) {
             acctInfoDiv.textContent = response.message;
             acctInfoDiv.style.color = "red";
             makeAcctButton.disabled = false;
+            makePaymentButton.disabled = true;
         } else if (typeof response == "object") {
-            delete response["_links"];
+            delete response["_links"]; // too verbose
             acctInfoDiv.textContent = JSON.stringify(response, null, 4);
             acctInfoDiv.style.color = "";
             makeAcctButton.disabled = true;
+            makePaymentButton.disabled = false;
         } else {
             acctInfoDiv.textContent = response;
             acctInfoDiv.style.color = "red";
             makeAcctButton.disabled = false;
+            makePaymentButton.disabled = true;
         }
     }
 
@@ -147,7 +151,7 @@
          <input id="payment_memo" type="text"></label><br/>
   <label>Lumens to send:<br/>
          <input id="payment_qty" type="text"></label><br/>
-  <button onclick="makePayment()">Make payment</button>
+  <button id="make_payment" onclick="makePayment()">Make payment</button>
   <div id="payment_info" style="white-space: pre; border: solid 1px black; font-family: monospace"></div>
  </body>
 </html>

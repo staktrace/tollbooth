@@ -18,13 +18,22 @@
         fetchAccountInfo();
     }
 
+    function getKeypair() {
+        var sec = document.getElementById("secret_key").value;
+        return StellarSdk.Keypair.fromSecret(sec);
+    }
+
+    function getPublicKey() {
+        return document.getElementById("public_key").textContent;
+    }
+
     function testServer() {
         return new StellarSdk.Server("https://horizon-testnet.stellar.org");
     }
 
     function fetchAccountInfo() {
         updateAccountInfo("Fetching account info...");
-        var publicKey = document.getElementById("public_key").textContent;
+        var publicKey = getPublicKey();
         testServer().accounts().accountId(publicKey).call().then(updateAccountInfo, updateAccountInfo);
     }
 
@@ -51,7 +60,7 @@
         updateAccountInfo("Creating account...");
         var server = testServer();
         var friendbot = StellarSdk.Keypair.fromSecret("SA3W53XXG64ITFFIYQSBIJDG26LMXYRIMEVMNQMFAQJOYCZACCYBA34L");
-        var publicKey = document.getElementById("public_key").textContent;
+        var publicKey = getPublicKey();
         server.accounts().accountId(friendbot.publicKey()).call().then(
             ({ sequence }) => {
                 var account = new StellarSdk.Account(friendbot.publicKey(), sequence);
@@ -79,6 +88,37 @@
         );
     }
 
+    function makePayment() {
+        var dest = document.getElementById("payment_dest").value;
+        var memo = document.getElementById("payment_memo").value;
+        var qty = document.getElementById("payment_qty").value;
+        var publicKey = document.getElementById("public_key").textContent;
+        var server = testServer();
+        var transaction = new StellarSdk.TransactionBuilder(publicKey, {
+            fee: StellarSdk.BASE_FEE,
+            networkPassphrase: StellarSdk.Networks.TESTNET,
+            memo: new StellarSdk.Memo(StellarSdk.MemoText, memo)
+        }).addOperation(StellarSdk.Operation.payment({
+            destination: dest,
+            asset: Asset.native(),
+            amount: qty
+        })).build();
+        transaction.sign(getKeypair());
+        var paymentInfoDiv = document.getElementById("payment_info");
+        server.submitTransaction(transaction).then(
+            (results) => {
+                console.log("Transaction completed: ", results._links.transaction.href);
+                paymentInfoDiv.textContent = results;
+                paymentInfoDiv.style.color = "";
+            },
+            (failureBlob) => {
+                console.log("Transaction failed: ", failureBlob);
+                paymentInfoDiv.textContent = failureBlob;
+                paymentInfoDiv.style.color = "red";
+            }
+        );
+    }
+
     window.addEventListener("load", function() {
         var sec = localStorage.getItem("private-key");
         if (sec != null) {
@@ -100,5 +140,14 @@
   Account information:
   <div id="account_info" style="white-space: pre; border: solid 1px black; font-family: monospace"></div>
   <button id="make_account" onclick="makeAccount()">Make account</button>
+  <h1>3. Send payment</h1>
+  <label>Destination wallet's public key:<br/>
+         <input id="payment_dest" type="text" style="width: 60em"></label><br/>
+  <label>Payment memo:<br/>
+         <input id="payment_memo" type="text"></label><br/>
+  <label>Lumens to send:<br/>
+         <input id="payment_qty" type="text"></label><br/>
+  <button onclick="makePayment()">Make payment</button>
+  <div id="payment_info" style="white-space: pre; border: solid 1px black; font-family: monospace"></div>
  </body>
 </html>

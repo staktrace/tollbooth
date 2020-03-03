@@ -8,6 +8,7 @@
     function makeKeypair() {
         var kp = StellarSdk.Keypair.random();
         document.getElementById("secret_key").value = kp.secret();
+        updatePublicKey();
     }
 
     function updatePublicKey() {

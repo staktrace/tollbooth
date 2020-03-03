@@ -124,6 +124,8 @@
     }
 
     window.addEventListener("load", function() {
+        document.getElementById("make_account").disabled = true;
+        document.getElementById("make_payment").disabled = true;
         var sec = localStorage.getItem("private-key");
         if (sec != null) {
             document.getElementById("secret_key").value = sec;

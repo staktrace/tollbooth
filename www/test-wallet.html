@@ -99,25 +99,35 @@
         var qty = document.getElementById("payment_qty").value;
         var publicKey = document.getElementById("public_key").textContent;
         var server = testServer();
-        var transaction = new StellarSdk.TransactionBuilder(publicKey, {
-            fee: StellarSdk.BASE_FEE,
-            networkPassphrase: StellarSdk.Networks.TESTNET,
-            memo: new StellarSdk.Memo(StellarSdk.MemoText, memo)
-        }).addOperation(StellarSdk.Operation.payment({
-            destination: dest,
-            asset: Asset.native(),
-            amount: qty
-        })).build();
-        transaction.sign(getKeypair());
-        var paymentInfoDiv = document.getElementById("payment_info");
-        server.submitTransaction(transaction).then(
-            (results) => {
-                console.log("Transaction completed: ", results._links.transaction.href);
-                paymentInfoDiv.textContent = results;
-                paymentInfoDiv.style.color = "";
+       server.loadAccount(publicKey).then(
+            (account) => {
+                var transaction = new StellarSdk.TransactionBuilder(account, {
+                    fee: StellarSdk.BASE_FEE,
+                    networkPassphrase: StellarSdk.Networks.TESTNET,
+                    memo: new StellarSdk.Memo(StellarSdk.MemoText, memo)
+                }).addOperation(StellarSdk.Operation.payment({
+                    destination: dest,
+                    asset: StellarSdk.Asset.native(),
+                    amount: qty
+                })).setTimeout(10).build();
+                transaction.sign(getKeypair());
+                var paymentInfoDiv = document.getElementById("payment_info");
+                server.submitTransaction(transaction).then(
+                    (results) => {
+                        console.log("Transaction completed: ", results._links.transaction.href);
+                        paymentInfoDiv.textContent = results;
+                        paymentInfoDiv.style.color = "";
+                    },
+                    (failureBlob) => {
+                        console.log("Transaction failed: ", failureBlob);
+                        paymentInfoDiv.textContent = failureBlob;
+                        paymentInfoDiv.style.color = "red";
+                    }
+                );
             },
             (failureBlob) => {
-                console.log("Transaction failed: ", failureBlob);
+                var paymentInfoDiv = document.getElementById("payment_info");
+                console.log("Failed to fetch account: ", failureBlob);
                 paymentInfoDiv.textContent = failureBlob;
                 paymentInfoDiv.style.color = "red";
             }

@@ -3,69 +3,61 @@
  <head>
   <meta charset="utf-8">
   <title>Utility page to manage a test wallet on Stellar</title>
+  <style>
+    .box {
+        border: solid 1px black;
+    }
+
+    .output {
+        white-space: pre;
+        font-family: monospace;
+    }
+  </style>
   <script src="stellar-sdk.js"></script>
   <script type="text/javascript">
-    function makeKeypair() {
-        var kp = StellarSdk.Keypair.random();
-        document.getElementById("secret_key").value = kp.secret();
-        updatePublicKey();
+    const States = {
+        INITIAL: "initial",
+        ACCOUNT_NONE: "account_none",
+        ACCOUNT_CREATING: "account_creating",
+        ACCOUNT_LOADING: "account_loading",
+        ACCOUNT_INFO: "account_info",
+        ACCOUNT_ERROR: "account_error"
+    };
+
+    var gCurrentState = States.INITIAL;
+    var gTransactionTimeout = 10;
+
+    function changeState(state) {
+        var div = document.getElementById(gCurrentState);
+        if (div) {
+            div.style.display = 'none';
+        }
+        gCurrentState = state;
+        div = document.getElementById(gCurrentState);
+        if (div) {
+            div.style.display = 'block';
+        }
     }
 
-    function updatePublicKey() {
-        var sec = document.getElementById("secret_key").value;
-        localStorage.setItem("private-key", sec);
-        var kp = StellarSdk.Keypair.fromSecret(sec);
-        document.getElementById("public_key").textContent = kp.publicKey();
-        fetchAccountInfo();
-    }
-
-    function getKeypair() {
-        var sec = document.getElementById("secret_key").value;
-        return StellarSdk.Keypair.fromSecret(sec);
-    }
-
-    function getPublicKey() {
-        return document.getElementById("public_key").textContent;
+    function error(msg) {
+        console.log(msg);
+        document.getElementById("error_details").textContent = msg;
+        changeState(States.ACCOUNT_ERROR);
     }
 
     function testServer() {
         return new StellarSdk.Server("https://horizon-testnet.stellar.org");
     }
 
-    function fetchAccountInfo() {
-        updateAccountInfo("Fetching account info...");
-        var publicKey = getPublicKey();
-        testServer().accounts().accountId(publicKey).call().then(updateAccountInfo, updateAccountInfo);
-    }
-
-    function updateAccountInfo(response) {
-        var acctInfoDiv = document.getElementById("account_info");
-        var makeAcctButton = document.getElementById("make_account");
-        var makePaymentButton = document.getElementById("make_payment");
-        if (response instanceof StellarSdk.NotFoundError) {
-            acctInfoDiv.textContent = response.message;
-            acctInfoDiv.style.color = "red";
-            makeAcctButton.disabled = false;
-            makePaymentButton.disabled = true;
-        } else if (typeof response == "object") {
-            delete response["_links"]; // too verbose
-            acctInfoDiv.textContent = JSON.stringify(response, null, 4);
-            acctInfoDiv.style.color = "";
-            makeAcctButton.disabled = true;
-            makePaymentButton.disabled = false;
-        } else {
-            acctInfoDiv.textContent = response;
-            acctInfoDiv.style.color = "red";
-            makeAcctButton.disabled = false;
-            makePaymentButton.disabled = true;
-        }
-    }
-
     function makeAccount() {
-        updateAccountInfo("Creating account...");
+        changeState(States.ACCOUNT_CREATING);
+
+        var kp = StellarSdk.Keypair.random();
+        localStorage.setItem("private-key", kp.secret());
+
         var server = testServer();
         var friendbot = StellarSdk.Keypair.fromSecret("SA3W53XXG64ITFFIYQSBIJDG26LMXYRIMEVMNQMFAQJOYCZACCYBA34L");
-        var publicKey = getPublicKey();
+        var publicKey = kp.publicKey();
         server.accounts().accountId(friendbot.publicKey()).call().then(
             ({ sequence }) => {
                 var account = new StellarSdk.Account(friendbot.publicKey(), sequence);
@@ -75,31 +67,67 @@
                 }).addOperation(StellarSdk.Operation.createAccount({
                     destination: publicKey,
                     startingBalance: "100"
-                })).setTimeout(10).build();
+                })).setTimeout(gTransactionTimeout).build();
                 transaction.sign(friendbot);
                 return server.submitTransaction(transaction);
             },
             (failureBlob) => {
-                console.log("Failure when getting friendbot's account details: " + failureBlob);
+                error("Failure when getting friendbot's account details: " + failureBlob);
             }
         ).then(
             (results) => {
                 console.log("Transaction completed: ", results._links.transaction.href);
-                fetchAccountInfo();
+                loadAccount(kp);
             },
             (failureBlob) => {
-                console.log("Failure when submitting transaction to create account: " + failureBlob);
+                error("Failure when submitting transaction to create account: " + failureBlob);
             }
         );
     }
 
+    function loadAccount(kp) {
+        changeState(States.ACCOUNT_LOADING);
+
+        document.getElementById("secret_key").textContent = kp.secret();
+        document.getElementById("public_key").textContent = kp.publicKey();
+        testServer().accounts().accountId(kp.publicKey()).call().then(
+            (response) => {
+                delete response["_links"]; // too verbose
+                document.getElementById("account_details").textContent = JSON.stringify(response, null, 4);
+                changeState(States.ACCOUNT_INFO);
+                unlockPaymentStep();
+            },
+            (response) => {
+                if (response instanceof StellarSdk.NotFoundError) {
+                    error(response.message);
+                } else {
+                    error(response);
+                }
+            }
+        );
+    }
+
+    function unlockPaymentStep() {
+        document.getElementById("step_payment").style.display = 'block';
+    }
+
+    function getKeypair() {
+        var sec = document.getElementById("secret_key").textContent;
+        return StellarSdk.Keypair.fromSecret(sec);
+    }
+
     function makePayment() {
+        var paymentInfoDiv = document.getElementById("payment_info");
+        paymentInfoDiv.style.color = "";
+        paymentInfoDiv.textContent = "Attempting payment...";
+
         var dest = document.getElementById("payment_dest").value;
         var memo = document.getElementById("payment_memo").value;
         var qty = document.getElementById("payment_qty").value;
-        var publicKey = document.getElementById("public_key").textContent;
+        var kp = getKeypair();
+
         var server = testServer();
-       server.loadAccount(publicKey).then(
+        server.loadAccount(kp.publicKey()).then(
             (account) => {
                 var transaction = new StellarSdk.TransactionBuilder(account, {
                     fee: StellarSdk.BASE_FEE,
@@ -109,14 +137,13 @@
                     destination: dest,
                     asset: StellarSdk.Asset.native(),
                     amount: qty
-                })).setTimeout(10).build();
+                })).setTimeout(gTransactionTimeout).build();
                 transaction.sign(getKeypair());
-                var paymentInfoDiv = document.getElementById("payment_info");
                 server.submitTransaction(transaction).then(
-                    (results) => {
-                        console.log("Transaction completed: ", results._links.transaction.href);
-                        paymentInfoDiv.textContent = results;
-                        paymentInfoDiv.style.color = "";
+                    (response) => {
+                        console.log("Transaction completed: ", response._links.transaction.href);
+                        paymentInfoDiv.textContent = JSON.stringify(response, null, 4);
+                        loadAccount(kp);
                     },
                     (failureBlob) => {
                         console.log("Transaction failed: ", failureBlob);
@@ -126,7 +153,6 @@
                 );
             },
             (failureBlob) => {
-                var paymentInfoDiv = document.getElementById("payment_info");
                 console.log("Failed to fetch account: ", failureBlob);
                 paymentInfoDiv.textContent = failureBlob;
                 paymentInfoDiv.style.color = "red";
@@ -135,29 +161,42 @@
     }
 
     window.addEventListener("load", function() {
-        document.getElementById("make_account").disabled = true;
-        document.getElementById("make_payment").disabled = true;
         var sec = localStorage.getItem("private-key");
         if (sec != null) {
-            document.getElementById("secret_key").value = sec;
-            updatePublicKey();
+            try {
+                var kp = StellarSdk.Keypair.fromSecret(sec);
+                loadAccount(kp);
+                return;
+            } catch (e) {
+                console.log(e);
+            }
         }
+        changeState(States.ACCOUNT_NONE);
     }, false);
   </script>
  </head>
  <body>
-  <h1>1. Keypair creation</h1>
-  <p>If you have a secret key from an existing test account, enter it in the box below. Otherwise, click the button to generate a new keypair.</p>
-  <ul>
-   <li>Generate a new keypair for me. <button onclick="makeKeypair()">Make keypair</button></li>
-   <li>My secret key: <input id="secret_key" type="text" placeholder="56 character string starting with 'S'" style="width: 60em" onchange="updatePublicKey()"></li>
-  </ul>
-  The public key is <span id="public_key">???</span>
-  <h1>2. Account creation</h1>
-  Account information:
-  <div id="account_info" style="white-space: pre; border: solid 1px black; font-family: monospace"></div>
-  <button id="make_account" onclick="makeAccount()">Make account</button>
-  <h1>3. Send payment</h1>
+  <h1>1. Account creation</h1>
+  <p>If you have an existing test account saved in browser localstorage, it should populate below. Otherwise, click the button to create a new account (and save it in localstorage).</p>
+  <div id="account_none" class="box" style="display:none">No account detected. Click here to make one: <button id="make_account" onclick="makeAccount()">Make account</button></div>
+  <div id="account_creating" class="box" style="display:none">Creating account...</div>
+  <div id="account_loading" class="box" style="display:none">Loading account info...</div>
+  <div id="account_info" class="box" style="display:none">
+   <ul>
+    <li>Account secret key: <span id="secret_key"></span></li>
+    <li>Account public key: <span id="public_key"></span></li>
+    <li>Account details:
+     <div id="account_details" class="box output"></div>
+    </li>
+   </ul>
+  </div>
+  <div id="account_error" class="box" style="display:none; color: red">
+    There was an error encountered. Reload the page to try again. Error details:
+    <div id="error_details" class="box output"></div>
+  </div>
+
+  <div id="step_payment" style="display: none">
+  <h1>2. Send payment</h1>
   <label>Destination wallet's public key:<br/>
          <input id="payment_dest" type="text" style="width: 60em"></label><br/>
   <label>Payment memo:<br/>
@@ -165,6 +204,7 @@
   <label>Lumens to send:<br/>
          <input id="payment_qty" type="text"></label><br/>
   <button id="make_payment" onclick="makePayment()">Make payment</button>
-  <div id="payment_info" style="white-space: pre; border: solid 1px black; font-family: monospace"></div>
+  <div id="payment_info" class="box output">(payment results will go here)</div>
+  </div>
  </body>
 </html>

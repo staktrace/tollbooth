@@ -199,9 +199,9 @@
   <h1>2. Send payment</h1>
   <label>Destination wallet's public key:<br/>
          <input id="payment_dest" type="text" style="width: 60em"></label><br/>
-  <label>Payment memo:<br/>
-         <input id="payment_memo" type="text"></label><br/>
-  <label>Lumens to send:<br/>
+  <label>Payment memo (optional):<br/>
+         <input id="payment_memo" type="text" maxlength="28"></label><br/>
+  <label>Lumens to send (excludes transaction fees):<br/>
          <input id="payment_qty" type="text"></label><br/>
   <button id="make_payment" onclick="makePayment()">Make payment</button>
   <div id="payment_info" class="box output">(payment results will go here)</div>

@@ -1,5 +1,7 @@
-extern crate tokio;
+#[macro_use]
+extern crate log;
 extern crate reqwest;
+extern crate tokio;
 
 use futures_util::stream::StreamExt;
 use tokio::task::JoinHandle;
@@ -51,7 +53,7 @@ impl Tollbooth {
                 Ok(_) => {
                     match listener.listen_thread.await {
                         Ok(_) => (),
-                        Err(e) => eprintln!("Warning: listener thread for wallet {:?} panicked with {:?}", listener.wallet, e),
+                        Err(e) => error!("Listener thread for wallet {:?} panicked with {:?}", listener.wallet, e),
                     };
                 }
                 Err(_) => {
@@ -79,7 +81,7 @@ async fn listen_loop(wallet: Wallet, mut rx: UnboundedReceiver<ListenerCommand>)
     let reqwester = reqwest::Client::new();
     let mut stream = match make_request(&wallet, &reqwester).await {
         Err(e) => {
-            eprintln!("Error on initial request for wallet {:?}: {:?}", &wallet, e);
+            error!("Initial request to listen for wallet {:?} failed: {:?}", &wallet, e);
             return;
         }
         Ok(r) => r.bytes_stream(),
@@ -96,7 +98,7 @@ async fn listen_loop(wallet: Wallet, mut rx: UnboundedReceiver<ListenerCommand>)
             msg = rx.recv() => {
                 match msg {
                     None => {
-                        eprintln!("Listener task seems to have been detached by dropped parent");
+                        warn!("Listener task seems to have been detached by dropped parent");
                         shutdown = true;
                     }
                     Some(ListenerCommand::Shutdown) => {
@@ -105,21 +107,20 @@ async fn listen_loop(wallet: Wallet, mut rx: UnboundedReceiver<ListenerCommand>)
                 }
             }
             _ = &mut timer, if retrying => {
-                eprintln!("Retrying is {}", retrying);
                 match make_request(&wallet, &reqwester).await {
                     Err(e) => {
                         if retry_fail_delay > 1000 {
-                            eprintln!("Maximum number of failed retries reached, aborting...");
+                            error!("Maximum number of failed retries reached, aborting...");
                             shutdown = true;
                         } else {
                             retry_fail_delay = retry_fail_delay * 2;
-                            eprintln!("Error on retry request for wallet {:?}, retrying again in {}ms: {:?}", &wallet, retry_fail_delay, e);
+                            warn!("Error on retry request for wallet {:?}, retrying again in {}ms: {:?}", &wallet, retry_fail_delay, e);
                             timer = tokio::time::delay_for(tokio::time::Duration::from_millis(retry_fail_delay));
                         }
                     }
                     Ok(r) => {
-                        eprintln!("Refreshed connection to server");
                         stream = r.bytes_stream();
+                        info!("Successfully refreshed connection to server");
                         retrying = false;
                         retry_fail_delay = 500;
                     }
@@ -128,12 +129,12 @@ async fn listen_loop(wallet: Wallet, mut rx: UnboundedReceiver<ListenerCommand>)
             item = stream.next() => {
                 match item {
                     None => {
-                        eprintln!("Stream termination for wallet {:?}", &wallet);
+                        warn!("Unexpected stream termination for wallet {:?}, retrying connection", &wallet);
                         timer = tokio::time::delay_for(tokio::time::Duration::from_millis(0));
                         retrying = true;
                     }
                     Some(Err(e)) => {
-                        eprintln!("Error while streaming payments for wallet {:?}: {:?}", &wallet, e);
+                        warn!("Unexpected error while streaming payments for wallet {:?}: {:?}", &wallet, e);
                         timer = tokio::time::delay_for(tokio::time::Duration::from_millis(0));
                         retrying = true;
                     }
@@ -144,7 +145,7 @@ async fn listen_loop(wallet: Wallet, mut rx: UnboundedReceiver<ListenerCommand>)
                             let line = match std::str::from_utf8(&line) {
                                 Ok(t) => t.trim().to_string(),
                                 Err(_) => {
-                                    eprintln!("Error while UTF-8 decoding server-sent event; ignoring line");
+                                    warn!("Error while UTF-8 decoding server-sent event; ignoring line [{}]", String::from_utf8_lossy(&line));
                                     continue;
                                 }
                             };
@@ -155,7 +156,7 @@ async fn listen_loop(wallet: Wallet, mut rx: UnboundedReceiver<ListenerCommand>)
                             match key {
                                 "retry" => {
                                     let delay : u64 = value.parse().unwrap_or(0);
-                                    eprintln!("Got retry interval ({}), scheduling", value);
+                                    debug!("Got retry interval '{}' ({}), scheduling", value, delay);
                                     timer = tokio::time::delay_for(tokio::time::Duration::from_millis(delay));
                                     retrying = true;
                                 }

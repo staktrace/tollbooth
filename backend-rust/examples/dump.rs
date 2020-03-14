@@ -11,6 +11,8 @@ fn help() {
 
 #[tokio::main]
 async fn main() {
+    env_logger::init();
+
     let mut wallets = Vec::new();
     for arg in env::args().skip(1) {
         if arg.starts_with("stellar:test:") {

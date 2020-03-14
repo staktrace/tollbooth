@@ -83,6 +83,7 @@ async fn listen_loop(wallet: Wallet, mut rx: UnboundedReceiver<ListenerCommand>)
     };
 
     let mut shutdown = false;
+    let mut buffer = Vec::<u8>::new();
     while !shutdown {
         tokio::select! {
             msg = rx.recv() => {
@@ -109,7 +110,24 @@ async fn listen_loop(wallet: Wallet, mut rx: UnboundedReceiver<ListenerCommand>)
                         shutdown = true;
                     }
                     Some(Ok(bytes)) => {
-                        println!("Chunk: {:?}", bytes);
+                        buffer.extend_from_slice(&bytes);
+                        while let Some(ix_newline) = buffer.iter().position(|b| *b == b'\n') {
+                            let line = buffer.drain(0..ix_newline + 1).collect::<Vec<u8>>();
+                            let line = match std::str::from_utf8(&line) {
+                                Ok(t) => t.trim().to_string(),
+                                Err(_) => {
+                                    eprintln!("Error while UTF-8 decoding server-sent event; ignoring line");
+                                    continue;
+                                }
+                            };
+                            let split_ix = line.find(':').unwrap_or(line.len());
+                            let (key, value) = line.split_at(split_ix);
+                            match key {
+                                "retry" => (),
+                                "data" => println!("Got data {}", value),
+                                _ => (),
+                            };
+                        }
                     }
                 }
             }

@@ -1,7 +1,7 @@
 extern crate tokio;
 
 use std::env;
-use tollbooth_backend::{Tollbooth, Wallet};
+use tollbooth::{Tollbooth, Wallet};
 
 fn help() {
     eprintln!("Please provide wallets to listen for as command line arguments. Supported wallets:");

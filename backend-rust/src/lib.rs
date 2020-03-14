@@ -87,6 +87,8 @@ async fn listen_loop(wallet: Wallet, mut rx: UnboundedReceiver<ListenerCommand>)
 
     let mut retrying = false;
     let mut timer = tokio::time::delay_for(tokio::time::Duration::from_millis(0));
+    let mut retry_fail_delay = 500;
+
     let mut shutdown = false;
     let mut buffer = Vec::<u8>::new();
     while !shutdown {
@@ -106,14 +108,20 @@ async fn listen_loop(wallet: Wallet, mut rx: UnboundedReceiver<ListenerCommand>)
                 eprintln!("Retrying is {}", retrying);
                 match make_request(&wallet, &reqwester).await {
                     Err(e) => {
-                        eprintln!("Error on retry request for wallet {:?}: {:?}", &wallet, e);
-                        // Try again in a second
-                        timer = tokio::time::delay_for(tokio::time::Duration::from_millis(1000));
+                        if retry_fail_delay > 1000 {
+                            eprintln!("Maximum number of failed retries reached, aborting...");
+                            shutdown = true;
+                        } else {
+                            retry_fail_delay = retry_fail_delay * 2;
+                            eprintln!("Error on retry request for wallet {:?}, retrying again in {}ms: {:?}", &wallet, retry_fail_delay, e);
+                            timer = tokio::time::delay_for(tokio::time::Duration::from_millis(retry_fail_delay));
+                        }
                     }
                     Ok(r) => {
                         eprintln!("Refreshed connection to server");
                         stream = r.bytes_stream();
                         retrying = false;
+                        retry_fail_delay = 500;
                     }
                 };
             }

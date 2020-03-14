@@ -63,18 +63,21 @@ impl Tollbooth {
     }
 }
 
-async fn listen_loop(wallet: Wallet, mut rx: UnboundedReceiver<ListenerCommand>) {
+async fn make_request(wallet: &Wallet, reqwester: &reqwest::Client) -> Result<reqwest::Response, reqwest::Error> {
     let url = match &wallet {
         Wallet::StellarTest(pubkey) => format!("https://horizon-testnet.stellar.org/accounts/{}/payments", pubkey),
         Wallet::Stellar(pubkey) => format!("https://horizon.stellar.org/accounts/{}/payments", pubkey),
     };
-    let req = reqwest::Client::new()
-            .get(&url)
+    reqwester.get(&url)
             .header("Accept", "text/event-stream")
             .send()
             .await
-            .and_then(|r| r.error_for_status());
-    let mut stream = match req {
+            .and_then(|r| r.error_for_status())
+}
+
+async fn listen_loop(wallet: Wallet, mut rx: UnboundedReceiver<ListenerCommand>) {
+    let reqwester = reqwest::Client::new();
+    let mut stream = match make_request(&wallet, &reqwester).await {
         Err(e) => {
             eprintln!("Error on initial request for wallet {:?}: {:?}", &wallet, e);
             return;
@@ -82,6 +85,8 @@ async fn listen_loop(wallet: Wallet, mut rx: UnboundedReceiver<ListenerCommand>)
         Ok(r) => r.bytes_stream(),
     };
 
+    let mut retrying = false;
+    let mut timer = tokio::time::delay_for(tokio::time::Duration::from_millis(0));
     let mut shutdown = false;
     let mut buffer = Vec::<u8>::new();
     while !shutdown {
@@ -97,17 +102,32 @@ async fn listen_loop(wallet: Wallet, mut rx: UnboundedReceiver<ListenerCommand>)
                     }
                 }
             }
+            _ = &mut timer, if retrying => {
+                eprintln!("Retrying is {}", retrying);
+                match make_request(&wallet, &reqwester).await {
+                    Err(e) => {
+                        eprintln!("Error on retry request for wallet {:?}: {:?}", &wallet, e);
+                        // Try again in a second
+                        timer = tokio::time::delay_for(tokio::time::Duration::from_millis(1000));
+                    }
+                    Ok(r) => {
+                        eprintln!("Refreshed connection to server");
+                        stream = r.bytes_stream();
+                        retrying = false;
+                    }
+                };
+            }
             item = stream.next() => {
                 match item {
                     None => {
                         eprintln!("Stream termination for wallet {:?}", &wallet);
-                        // TODO: restart with new request
-                        shutdown = true;
+                        timer = tokio::time::delay_for(tokio::time::Duration::from_millis(0));
+                        retrying = true;
                     }
                     Some(Err(e)) => {
                         eprintln!("Error while streaming payments for wallet {:?}: {:?}", &wallet, e);
-                        // TODO: restart with new request
-                        shutdown = true;
+                        timer = tokio::time::delay_for(tokio::time::Duration::from_millis(0));
+                        retrying = true;
                     }
                     Some(Ok(bytes)) => {
                         buffer.extend_from_slice(&bytes);
@@ -120,10 +140,17 @@ async fn listen_loop(wallet: Wallet, mut rx: UnboundedReceiver<ListenerCommand>)
                                     continue;
                                 }
                             };
-                            let split_ix = line.find(':').unwrap_or(line.len());
-                            let (key, value) = line.split_at(split_ix);
+                            let (key, value) = match line.find(':') {
+                                Some(colon_ix) => (line[0..colon_ix].trim(), line[colon_ix + 1..].trim()),
+                                None => (line.trim(), ""),
+                            };
                             match key {
-                                "retry" => (),
+                                "retry" => {
+                                    let delay : u64 = value.parse().unwrap_or(0);
+                                    eprintln!("Got retry interval ({}), scheduling", value);
+                                    timer = tokio::time::delay_for(tokio::time::Duration::from_millis(delay));
+                                    retrying = true;
+                                }
                                 "data" => println!("Got data {}", value),
                                 _ => (),
                             };
